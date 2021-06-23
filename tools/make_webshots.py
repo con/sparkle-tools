@@ -23,10 +23,9 @@ import yaml
 
 log = logging.getLogger(__name__)
 
-ARCHIVE_GUI = "https://gui.dandiarchive.org"
-
 PAGES = ["landing", "edit-metadata", "view-data"]
 
+# might come handy, not used ATM
 @dataclass
 class LoadStat:
     dandiset: str
@@ -48,7 +47,7 @@ class LoadStat:
     def has_time(self) -> bool:
         return isinstance(self.time, float)
 
-
+# might come handy, not used ATM
 def render_stats(dandiset: str, stats: List[LoadStat]) -> str:
     s = f"### {dandiset}\n\n"
     header, row = zip(*map(LoadStat.get_columns, stats))
@@ -58,16 +57,9 @@ def render_stats(dandiset: str, stats: List[LoadStat]) -> str:
     s += "\n"
     return s
 
-def get_dandisets():
-    """Return a list of known dandisets"""
-    from dandi.dandiapi import DandiAPIClient
-    client = DandiAPIClient('https://api.dandiarchive.org/api')
-    dandisets = client.get('/dandisets', parameters={'page_size': 10000})
-    return sorted(x['identifier'] for x in dandisets['results'])
 
-
-def login(driver, username, password):
-    driver.get(ARCHIVE_GUI)
+def login(driver, url, username, password):
+    driver.get(url)
     wait_no_progressbar(driver, "v-progress-circular")
     try:
         login_button = driver.find_elements_by_xpath(
@@ -218,9 +210,9 @@ def get_ready_driver():
     #driver.set_script_timeout(30)
     #driver.implicitly_wait(10)
     driver = webdriver.Chrome(options=options)
-    login(driver, os.environ["DANDI_USERNAME"], os.environ["DANDI_PASSWORD"])
+    login(driver, os.environ["SPARKLE_USERNAME"], os.environ["SPARKLE_PASSWORD"])
     # warm up
-    driver.get(ARCHIVE_GUI)
+    # driver.get(ARCHIVE_GUI)
     return driver
 
 
@@ -232,53 +224,13 @@ if __name__ == '__main__':
     )
 
     if len(sys.argv) > 1:
-        dandisets = sys.argv[1:]
-        doreadme = False
+        url = sys.argv[1:]
     else:
-        dandisets = get_dandisets()
-        doreadme = True
+        url = 'https://ohbm.sparkle.space/'
 
-    readme = ''
     # To guarantee that we time out if something gets stuck
     socket.setdefaulttimeout(300)
     driver = get_ready_driver()
     allstats = []
-    for ds in dandisets:
-        # TEMP: to quickly test on a subset
-        # if int(ds) < 40:
-        #     continue
-        stats = process_dandiset(driver, ds)
-        readme += render_stats(ds, stats)
-        allstats.extend(stats)
     driver.quit()
 
-    if doreadme:
-        stat_tbl = "| Page | Min Time | Mean ± StdDev | Max Time | Errors |\n"
-        stat_tbl += "| --- | --- | --- | --- | --- |\n"
-        page_stats = defaultdict(list)
-        errors = defaultdict(list)
-        for st in allstats:
-            if st.has_time():
-                page_stats[st.page].append(st)
-            else:
-                errors[st.page].append(st.dandiset)
-        for page in PAGES:
-            stats = page_stats[page]
-            if stats:
-                minstat = min(stats, key=attrgetter("time"))
-                min_cell = f"{minstat.time:.2f}s ([{minstat.dandiset}](#{minstat.dandiset}))"
-                times = [st.time for st in stats]
-                mean = statistics.mean(times)
-                stddev = statistics.pstdev(times, mu=mean)
-                mean_stddev = f"{mean:.2f}s ± {stddev:.2f}s"
-                maxstat = max(stats, key=attrgetter("time"))
-                max_cell = f"{maxstat.time:.2f}s ([{maxstat.dandiset}](#{maxstat.dandiset}))"
-            else:
-                min_cell = mean_stddev = max_cell = "\u2014"
-            if errors[page]:
-                errs = ", ".join(f"[{ds}](#{ds})" for ds in errors[page])
-            else:
-                errs = "\u2014"
-            stat_tbl += f"| {page} | {min_cell} | {mean_stddev} | {max_cell} | {errs} |\n"
-        readme = stat_tbl + "\n\n" + readme
-        Path('README.md').write_text(readme)

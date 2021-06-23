@@ -70,6 +70,9 @@ class Timer:
         self.t = t
         return dt
 
+    def total(self):
+        return time.time() - self.t0
+
 
 def login(driver, url, username, password):
     ts = {}
@@ -123,14 +126,36 @@ def login(driver, url, username, password):
     ts['participants-appear'] = timer()
     rec['participants'] = n
 
-    if sha and os.environ.get("SPARKLE_CODEBASE"):
+    codebase = os.environ.get("SPARKLE_CODEBASE")
+    if codebase:
+        prefix = 'spark-build' if sha else 'codebase'
+        cmd = ['git', '-C', codebase]
+
+        if not sha and 'localhost' in url:
+            # take of the codebase
+            r = subprocess.run(
+                cmd + ['show-ref', 'HEAD'],
+                stdout=subprocess.PIPE,
+                universal_newlines=True,
+                )
+            if not r.returncode:  # only if didn't fail and found it
+                sha = r.stdout.strip().split()[0]
+                rec[f'{prefix}-sha'] = sha
+            else:
+                raise RuntimeError('must not happen')
+
+            # but that describe is not useful, let's show HEAD as well
+            rec[f'{prefix}-HEAD'] = open(f'{codebase}/.git/HEAD').read().strip().split()[-1]
+
         r = subprocess.run(
-            ['git', '-C', os.environ["SPARKLE_CODEBASE"], 'describe', '--all', sha],
+            cmd + ['describe', '--all', sha],
             stdout=subprocess.PIPE,
             universal_newlines=True,
-        )
+            )
         if not r.returncode:  # only if didn't fail and found it
-            rec['sparkle-build-describe'] = r.stdout.rstrip()
+            rec[f'{prefix}-describe'] = r.stdout.rstrip()
+
+    rec['total'] = timer.total()
     return rec
 
 
@@ -186,6 +211,9 @@ def case_poster_and_back(driver):
     driver.find_element_by_xpath('//*[@data-icon="home"]').click()
 
     wait_class('maproom')
+
+    rec['total'] = timer.total()
+
     return rec
 
 

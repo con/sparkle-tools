@@ -134,6 +134,61 @@ def login(driver, url, username, password):
     return rec
 
 
+def case_poster_and_back(driver):
+    """requires login to run first and us being on the home page"""
+    ts = {}
+    rec = {
+        'times': ts,
+    }
+    modal = driver.find_element_by_xpath('//img[@alt="Poster Hall"]')
+
+    timer = Timer()
+    modal.click()
+
+    def wait_class(cls, name=None):
+        name = name or cls
+        e = wait_until(
+            driver,
+            EC.presence_of_element_located((By.CLASS_NAME, cls))
+        )
+        if name in ts:
+            # add some index
+            for idx in range(100):
+                n = f"{name}#{idx}"
+                if n in ts:
+                    continue
+                name = n
+                break
+        ts[name] = timer()
+        return e
+
+    wait_class('room-entry-button').click()
+
+    wait_class('PosterHallSearch__input')
+
+    wait_class('PosterHall__more-button')
+
+    # choose first poster listed
+    wait_class("PosterPreview").click()
+
+    more_info = wait_class('PosterPage__moreInfoUrl')
+    rec['visited_poster'] = more_info.text
+
+    driver.find_element_by_xpath('//span[@class="back-link"]').click()
+
+    wait_class('PosterHallSearch__input')
+
+    # go to the likely the same poster but then home from there
+    wait_class("PosterPreview").click()
+    more_info = wait_class('PosterPage__moreInfoUrl')
+    rec['visited_poster#2'] = more_info.text
+
+    driver.find_element_by_xpath('//*[@data-icon="home"]').click()
+
+    wait_class('maproom')
+    return rec
+
+
 def wait_until(driver, until):
     return WebDriverWait(driver, 300, poll_frequency=0.1).until(until)
 
@@ -145,7 +200,7 @@ def get_ready_driver():
         options.add_argument('--new-window')
     else:
         options.add_argument('--no-sandbox')
-        options.add_argument('--headless')
+        # options.add_argument('--headless')
         options.add_argument('--incognito')
         # options.add_argument('--disable-gpu')
         options.add_argument('--disable-dev-shm-usage')
@@ -176,9 +231,10 @@ if __name__ == '__main__':
     driver = get_ready_driver()
     try:
         allstats = {}
+
         # yoh recommends to create a file with those secrets exported outside of the repo
         allstats['initial-login'] = login(driver, url, os.environ["SPARKLE_USERNAME"], os.environ["SPARKLE_PASSWORD"])
-
+        allstats['poster-and-back'] = case_poster_and_back(driver)
 
         allstats['total'] = overall()
         print(json.dumps(allstats, indent=2))

@@ -134,7 +134,7 @@ def login(driver, url, username, password):
         if not sha and 'localhost' in url:
             # take of the codebase
             r = subprocess.run(
-                cmd + ['show-ref', 'HEAD'],
+                cmd + ['rev-parse', '--quiet', '--verify', 'HEAD'],
                 stdout=subprocess.PIPE,
                 universal_newlines=True,
                 )
@@ -208,7 +208,12 @@ def case_poster_and_back(driver):
     more_info = wait_class('PosterPage__moreInfoUrl')
     rec['visited_poster#2'] = more_info.text
 
-    driver.find_element_by_xpath('//*[@data-icon="home"]').click()
+    home_icon = wait_until(
+        driver,
+        EC.presence_of_element_located((By.XPATH, '//*[@data-icon="home"]'))
+    )
+    ts['home-icon'] = timer()
+    home_icon.click()
 
     wait_class('maproom')
 

@@ -20,6 +20,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.common.exceptions import WebDriverException
 import yaml
+import json
 
 log = logging.getLogger(__name__)
 
@@ -58,42 +59,68 @@ def render_stats(dandiset: str, stats: List[LoadStat]) -> str:
     return s
 
 
+class Timer:
+    def __init__(self):
+        self.t = self.t0 = time.time()
+
+    def __call__(self):
+        t = time.time()
+        dt = t - self.t
+        self.t = t
+        return dt
+
+
 def login(driver, url, username, password):
-    driver.get(url)
-    wait_no_progressbar(driver, "v-progress-circular")
-    try:
-        login_button = driver.find_elements_by_xpath(
-            "//button[@id='login']"
-        )[0]
-        login_text = login_button.text.strip().lower()
-        assert "log in" in login_text.lower(), \
-            f"Login button did not have expected text; expected 'log in', got {login_text!r}"
-        login_button.click()
+    ts = {}
+    rec = {
+        'times': ts,
+    }
+    timer = Timer()
 
-        WebDriverWait(driver, 300).until(
-            EC.presence_of_element_located((By.ID, "login_field")))
+    driver.get(url + '/in/home')
+    btn = wait_until(
+        driver,
+        EC.presence_of_element_located((By.CLASS_NAME, 'login-button'))
+    )
+    btn.click()
+    # driver.find_element_by_class_name('login-button').click()
+    email = wait_until(driver, EC.presence_of_element_located((By.XPATH, '//input[@name="email"]')))
+    email.send_keys(username)
 
-        username_field = driver.find_element_by_id("login_field")
-        password_field = driver.find_element_by_id("password")
-        username_field.send_keys(username)
-        password_field.send_keys(password)
-        #driver.save_screenshot("logging-in.png")
-        driver.find_elements_by_tag_name("form")[0].submit()
+    pwd = wait_until(driver, EC.presence_of_element_located((By.XPATH, '//input[@name="password"]')))
+    pwd.send_keys(password)
 
-        # Here we might get "Authorize" dialog or not
-        # Solution based on https://stackoverflow.com/a/61895999/1265472
-        # chose as the most straight-forward
-        for i in range(2):
-            el = WebDriverWait(driver, 300).until(
-                lambda driver: driver.find_elements(By.XPATH, '//input[@value="Authorize"]') or
-                               driver.find_elements_by_class_name("v-avatar"))[0]
-            if getattr(el, "tag_name") == 'input':
-                el.click()
-            else:
-                break
-    except Exception:
-        #driver.save_screenshot("failure.png")
-        raise
+    login = wait_until(driver, EC.presence_of_element_located((By.XPATH, '//input[@value="Log in"]')))
+    login.click()
+
+    ts['login'] = timer()
+
+    # wait for the nav-sparkle-logo div to appear as a signal that we went through the
+    # blue screen of sparkle
+    wait_until(driver, EC.presence_of_element_located((By.CLASS_NAME, 'nav-sparkle-logo')))
+    ts['main-screen-appear'] = timer()
+
+    # from now on even finding an element becomes a "heavy task"
+    # get info on what state we use
+    e = driver.find_element_by_xpath('/html/head/meta[@name="sparkle-build-sha1"]')
+    rec['sparkle-build-sha1'] = e.get_attribute('content')
+
+    # silly way to wait until we see some reasonable number of attendees
+    for i in range(100):
+        # might need to wait_until!?
+        e = driver.find_element_by_xpath('//div[@class="venue-partygoers-container"]')
+        if e:
+            n = e.text.split()
+            if n:
+                n = int(n[0])
+                if n > 100:
+                    break
+                print(f"Detected only {n} participants, waiting longer")
+        time.sleep(0.1)
+    else:
+        raise RuntimeError("Did not get reasonable number of participants.")
+    ts['participants-appear'] = timer()
+    return rec
 
 
 def wait_no_progressbar(driver, cls):
@@ -101,7 +128,11 @@ def wait_no_progressbar(driver, cls):
         EC.invisibility_of_element_located((By.CLASS_NAME, cls)))
 
 
-def process_dandiset(driver, ds):
+def wait_until(driver, until):
+    return WebDriverWait(driver, 300, poll_frequency=0.1).until(until)
+
+
+def __process_dandiset(driver, ds):
 
     def click_edit():
         # might still take a bit to appear
@@ -200,19 +231,19 @@ def process_dandiset(driver, ds):
 # to help with "invalid session id" by reinitializing the entire driver
 def get_ready_driver():
     options = Options()
-    options.add_argument('--no-sandbox')
-    options.add_argument('--headless')
-    options.add_argument('--incognito')
-    #options.add_argument('--disable-gpu')
+    if False:  # interactive_logged_in:
+        options.add_argument('--new-window')
+    else:
+        options.add_argument('--no-sandbox')
+        # options.add_argument('--headless')
+        options.add_argument('--incognito')
+        # options.add_argument('--disable-gpu')
+        options.add_argument('--disable-dev-shm-usage')
     options.add_argument("--window-size=1024,1400")
-    options.add_argument('--disable-dev-shm-usage')
     #driver.set_page_load_timeout(30)
     #driver.set_script_timeout(30)
     #driver.implicitly_wait(10)
     driver = webdriver.Chrome(options=options)
-    login(driver, os.environ["SPARKLE_USERNAME"], os.environ["SPARKLE_PASSWORD"])
-    # warm up
-    # driver.get(ARCHIVE_GUI)
     return driver
 
 
@@ -232,5 +263,8 @@ if __name__ == '__main__':
     socket.setdefaulttimeout(300)
     driver = get_ready_driver()
     allstats = []
+    # yoh recommends to create a file with those secrets exported outside of the repo
+    rec = login(driver, url, os.environ["SPARKLE_USERNAME"], os.environ["SPARKLE_PASSWORD"])
+    print(json.dumps(rec, indent=2))
     driver.quit()
 

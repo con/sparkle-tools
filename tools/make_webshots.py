@@ -125,10 +125,12 @@ def login(driver, url, username, password):
 
     if sha and os.environ.get("SPARKLE_CODEBASE"):
         r = subprocess.run(
-            ['git', '-C', os.environ["SPARKLE_CODEBASE"], 'describe', '--all', sha]
+            ['git', '-C', os.environ["SPARKLE_CODEBASE"], 'describe', '--all', sha],
+            stdout=subprocess.PIPE,
+            universal_newlines=True,
         )
         if not r.returncode:  # only if didn't fail and found it
-            rec['sparkle-build-describe'] = r.stdout
+            rec['sparkle-build-describe'] = r.stdout.rstrip()
     return rec
 
 
@@ -176,6 +178,7 @@ if __name__ == '__main__':
         allstats = {}
         # yoh recommends to create a file with those secrets exported outside of the repo
         allstats['initial-login'] = login(driver, url, os.environ["SPARKLE_USERNAME"], os.environ["SPARKLE_PASSWORD"])
+
 
         allstats['total'] = overall()
         print(json.dumps(allstats, indent=2))
